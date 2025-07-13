@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chia Sẻ Màn Hình</title>
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+        #container {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        #video-container {
+            background: #000;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        #screen-share {
+            width: 100%;
+            max-height: 80vh;
+            display: none;
+        }
+        .controls {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+        button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            background-color: #4285f4;
+            color: white;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        button:hover {
+            background-color: #3367d6;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        #status {
+            text-align: center;
+            padding: 10px;
+            background: #e8f0fe;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        #peers-count {
+            font-weight: bold;
+            color: #4285f4;
+        }
+        .instructions {
+            background: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .instructions h3 {
+            color: #4285f4;
+        }
+        .instructions ol {
+            padding-left: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Chia Sẻ Màn Hình</h1>
+
+    <div id="container">
+        <div id="status">
+            <div>🟢 Kết nối: <span id="connection-status">Đang chuẩn bị...</span></div>
+            <div>👀 Người xem: <span id="peers-count">0</span></div>
+            <div id="peer-id" style="font-size:12px;color:#666;">ID: Đang tạo...</div>
+        </div>
+
+        <div class="controls">
+            <button id="start-btn">Bắt Đầu Chia Sẻ</button>
+            <button id="stop-btn" disabled>Dừng Chia Sẻ</button>
+        </div>
+
+        <div id="video-container">
+            <video id="screen-share" autoplay playsinline></video>
+        </div>
+
+        <div class="instructions">
+            <h3>Cách Sử Dụng:</h3>
+            <ol>
+                <li>Nhấn nút "Bắt Đầu Chia Sẻ" và chọn màn hình bạn muốn chia sẻ</li>
+                <li>Gửi URL này cho người khác hoặc dùng QuickShare để gửi nhanh</li>
+                <li>Nhấn "Dừng Chia Sẻ" khi bạn muốn kết thúc</li>
+            </ol>
+            <h3>Cách tạo web miễn phí:</h3>
+            <ol>
+                <li>Tạo tài khoản GitHub miễn phí tại github.com</li>
+                <li>Tạo repository mới (đặt tên tùy ý)</li>
+                <li>Upload file này và đặt tên là index.html</li>
+                <li>Vào Settings > Pages > Chọn main branch</li>
+                <li>Save và đợi 1-2 phút để có link web công khai</li>
+                <li>Có thể dùng Netlify Drop (netlify.com) để kéo-thả file</li>
+            </ol>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
+
+    <script>
+        const startBtn = document.getElementById('start-btn');
+        const stopBtn = document.getElementById('stop-btn');
+        const screenShare = document.getElementById('screen-share');
+        const connectionStatus = document.getElementById('connection-status');
+        const peersCount = document.getElementById('peers-count');
+
+        let peer = null;
+        let stream = null;
+        let connections = new Set();
+        let currentPeerId = null;
+
+        function initPeer() {
+            peer = new Peer({
+                host: 'peerjs-server.herokuapp.com',
+                secure: true,
+                config: {
+                    iceServers: [
+                        { urls: 'stun:stun.l.google.com:19302' },
+                        { urls: 'turn:numb.viagenie.ca', credential: 'muazkh', username: 'webrtc@live.com' }
+                    ]
+                },
+                debug: 2
+            });
+
+            peer.on('open', id => {
+                currentPeerId = id;
+                connectionStatus.textContent = 'Sẵn sàng!';
+                connectionStatus.style.color = '#4CAF50';
+                document.getElementById('peer-id').textContent = `ID: ${id.substring(0, 8)}...`;
+                window.history.replaceState({}, '', `?id=${id}`);
+
+                const shareUrl = `${window.location.origin}${window.location.pathname}?id=${id}`;
+                if (navigator.clipboard) {
+                    navigator.clipboard.writeText(shareUrl).then(() => {
+                        alert(`Đã sao chép link chia sẻ vào clipboard:\n${shareUrl}`);
+                    });
+                }
+            });
+
+            peer.on('connection', conn => {
+                conn.on('open', () => {
+                    connections.add(conn);
+                    updatePeersCount();
+                    if (stream) {
+                        callPeer(conn.peer);
+                    }
+                });
+
+                conn.on('close', () => {
+                    connections.delete(conn);
+                    updatePeersCount();
+                });
+
+                conn.on('error', err => {
+                    console.error('Connection error:', err);
+                    connections.delete(conn);
+                    updatePeersCount();
+                });
+            });
+
+            peer.on('error', err => {
+                console.error('Peer error:', err);
+                connectionStatus.textContent = 'Lỗi kết nối';
+                connectionStatus.style.color = '#F44336';
+            });
+
+            peer.on('disconnected', () => {
+                connectionStatus.textContent = 'Mất kết nối';
+                connectionStatus.style.color = '#FF9800';
+            });
+        }
+
+        function updatePeersCount() {
+            peersCount.textContent = connections.size;
+        }
+
+        async function startScreenShare() {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+                alert("Trình duyệt không hỗ trợ chia sẻ màn hình.");
+                return;
+            }
+            try {
+                stream = await navigator.mediaDevices.getDisplayMedia({
+                    video: {
+                        cursor: 'always'
+                    },
+                    audio: false
+                });
+
+                screenShare.srcObject = stream;
+                screenShare.style.display = 'block';
+                startBtn.disabled = true;
+                stopBtn.disabled = false;
+
+                connections.forEach(conn => {
+                    callPeer(conn.peer);
+                });
+
+                stream.getTracks().forEach(track => {
+                    track.onended = () => {
+                        stopScreenShare();
+                    };
+                });
+
+            } catch (err) {
+                console.error('Error sharing screen:', err);
+                alert('Không thể chia sẻ màn hình: ' + err.message);
+            }
+        }
+
+        function stopScreenShare() {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+                stream = null;
+            }
+            screenShare.srcObject = null;
+            screenShare.style.display = 'none';
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+        }
+
+        function callPeer(peerId) {
+            const call = peer.call(peerId, stream);
+            call.on('stream', remoteStream => {});
+            call.on('close', () => {
+                connections.forEach(conn => {
+                    if (conn.peer === peerId) {
+                        connections.delete(conn);
+                        updatePeersCount();
+                    }
+                });
+            });
+            call.on('error', err => {
+                console.error('Call error:', err);
+            });
+        }
+
+        startBtn.addEventListener('click', startScreenShare);
+        stopBtn.addEventListener('click', stopScreenShare);
+
+        function checkForExistingPeerId() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const peerId = urlParams.get('id');
+            if (peerId) {
+                connectionStatus.textContent = 'Đang kết nối...';
+                history.replaceState({}, '', window.location.pathname);
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            initPeer();
+            checkForExistingPeerId();
+        });
+    </script>
+</body>
+</html>
